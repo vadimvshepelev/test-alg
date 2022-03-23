@@ -1,20 +1,22 @@
 import numpy as np
 from statsmodels.tsa.arima.model import ARIMA
-from math import sin
+import math
 from random import random
 import pandas as pd
 import matplotlib.pyplot as plt
+import functools
+from scipy.optimize import minimize_scalar
 
 
 def func_1():
     """Функция из первой ячейки, подбирает АРМА-параметры к синусоиде со случайным шумом"""
     n_max = 102
     # Задаем ряд
-    price_ser_src = pd.Series([sin(x) + 10*random() for x in range(1, n_max)])
+    price_ser_src = pd.Series([sin(x) + 10 * random() for x in range(1, n_max)])
     # p_ser = price_ser_src[::5]
     # Находим mu (тренд)
     # Простой способ -- первая разность
-    mu_arr = np.array([price_ser_src[i]-price_ser_src[i-1] if i > 0 else 0. for i in range(len(price_ser_src)) ])
+    mu_arr = np.array([price_ser_src[i] - price_ser_src[i - 1] if i > 0 else 0. for i in range(len(price_ser_src))])
     # Находим параметры ARMA (подгоняем модель)
     model = ARIMA(price_ser_src, order=(4, 0, 4))
     model_fit = model.fit()
@@ -23,10 +25,10 @@ def func_1():
     # yhat = model_fit.predict(len(data), len(data))
     # print(yhat)
     # График
-    plt.title("Временной ряд") # заголовок
-    plt.xlabel("n") # ось абсцисс
-    plt.ylabel("p_n") # ось ординат
-    plt.grid()      # включение отображение сетки
+    plt.title("Временной ряд")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("p_n")  # ось ординат
+    plt.grid()  # включение отображение сетки
     # plt.plot(p_ser)  # построение графика
     plt.plot(price_ser_src)
     plt.plot(mu_arr)
@@ -206,11 +208,299 @@ def load_test_data():
     plt.show()
 
     return p_arr_stable, mu_arr_stable, \
-        p_arr_growth, mu_arr_growth, \
-        p_arr_si_14, mu_arr_si_14, \
-        p_arr_si_21, mu_arr_si_21
+           p_arr_growth, mu_arr_growth, \
+           p_arr_si_14, mu_arr_si_14, \
+           p_arr_si_21, mu_arr_si_21
 
 
-p_arr_arma, mu_arr_arma = create_arma44_ser()
-load_test_data()
+def minus_eg(k, _d_inv, _mu, _delta_t):
+    """Функция Eg, которую мы максимизируем, взятая со знаком минус, потому что scipy.optimize ищет минимум."""
+    res = -_mu / math.fabs(_mu) * _d_inv / k * (math.exp(k * _mu * _delta_t) + math.exp(-k * _mu * _delta_t) - 2.)
+    return res
 
+
+def calc_alg0(_p_arr, _mu_arr, di0):
+    """Расчет по алгоритму alg 0.1, на входе массивы p, mu и начальная инвестиция"""
+    n_max = len(_p_arr) - 1
+    # Ограничения на K
+    k_min = -10
+    k_max = 10
+    # Массивы
+    t_max = float(n_max)  # /100
+    t_arr = np.linspace(0., t_max, n_max + 1)
+    # dt = t_arr[1]-t_arr[0]
+    dt = 1
+    k_arr = np.zeros(n_max + 1)
+    dg_arr = np.zeros(n_max + 1)
+    di_arr = np.zeros(n_max + 1)
+    di_arr[0] = di0
+    # print('Starting alg0, I_0 = ', di0)
+    for i in range(1, n_max - 1):
+        des_str = ''
+        if math.fabs(_mu_arr[i]) <= .1:
+            k_arr[i] = 0.
+            dg_arr[i] = 0.
+            des_str = 'Nothing'
+            di_arr[i + 1] = 0.
+        else:
+            mu_normalized = _mu_arr[i] / 10
+            minus_eg_cur = functools.partial(minus_eg, _d_inv=di_arr[i], _mu=mu_normalized, _delta_t=dt)
+            """k_line = np.linspace(k_min, k_max, 100)
+            f = np.array([minus_eg_cur(k)for k in k_line])
+            plt.plot(k_line, f)
+            plt.show()"""
+            k_cur = minimize_scalar(minus_eg_cur, bounds=(k_min, k_max), method='bounded').x
+            k_arr[i] = k_cur
+            dg_arr[i] = k_cur / math.fabs(k_cur) * (_p_arr[i] - _p_arr[i - 1])
+
+            if dg_arr[i] < 20:
+                k_arr[i] = 0.
+                dg_arr[i] = 0.
+                di_arr[i] = 0.
+                des_str = 'Nothing'
+            else:
+                if k_cur >= 0:
+                    des_str = 'Buy'
+                else:
+                    des_str = 'Sell'
+            di_arr[i + 1] = di_arr[i] + k_arr[i] * dg_arr[i]
+            if True:
+                print(f'iter={i}, t={round(t_arr[i], 2)}, I={round(di_arr[i], 4)}, mu={round(mu_normalized, 4)}',
+                      f'g={round(dg_arr[i], 4)}, K={round(k_arr[i], 4)} -> {des_str}')
+                pass
+    dk_ser = pd.Series(k_arr[:-2], index=t_arr[:-2])
+    dg_ser = pd.Series(dg_arr[:-2], index=t_arr[:-2])
+    di_ser = pd.Series(di_arr[:-2], index=t_arr[:-2])
+    # print(di_arr)
+    plt.figure(figsize=(20, 3))
+
+    n_lst = list(range(len(_p_arr)))
+    plt.subplot(141)
+    plt.title("Price")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("p_n")  # ось ординат
+    plt.grid()  # включение отображение сетки
+    # plt.plot(p_ser)  # построение графика
+    plt.plot(n_lst, _p_arr)
+    plt.legend(['p_n'], loc="upper left")
+    plt.subplot(142)
+    plt.plot(dg_ser[:n_max - 2], marker='o')
+    plt.xlabel("t")
+    plt.ylabel("dg")
+    plt.title("Current profit")
+    plt.grid()
+    plt.subplot(143)
+    plt.plot(di_ser[:n_max - 2], marker='o')
+    plt.xlabel("t")
+    plt.ylabel("dI")
+    plt.title("Current investment")
+    plt.grid()
+    plt.subplot(144)
+    plt.plot(k_arr[:n_max - 2])
+    plt.xlabel("t")
+    plt.ylabel("K")
+    plt.title("PID Gain coefficient")
+    plt.grid()
+    plt.show()
+
+    plt.figure(figsize=(20, 3))
+    # plt.tight_layout()
+    plt.subplot(141)
+    plt.title("Trend modeling by first difference")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("mu")  # ось ординат
+    plt.grid()  # включение отображение сетки
+    plt.plot(n_lst, _mu_arr, color='orange')
+    plt.legend(['mu'], loc="upper left")
+    plt.subplot(142)
+    plt.plot(np.cumsum(dg_ser[:n_max - 2]), color='orange')
+    plt.xlabel("t")
+    plt.ylabel("g")
+    plt.title("Cumulative profit")
+    plt.grid()
+    plt.subplot(143)
+    plt.plot(np.cumsum(di_ser[:n_max - 2]), color='orange')
+    plt.xlabel("t")
+    plt.ylabel("I")
+    plt.title("Cumulative investment")
+    plt.grid()
+    plt.subplot(144)
+    plt.plot(k_arr[:n_max - 2])
+    plt.xlabel("t")
+    plt.ylabel("K")
+    plt.title("(technical plot 1)")
+    plt.grid()
+    # plt.subplots_adjust(wspace=0, hspace=0)
+    plt.show()
+
+    figure = plt.figure(figsize=(10, 3))
+    plt.title("Decision Buy/Sell/Do nothing (zoomed)")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("K_n")  # ось ординат
+    plt.grid()  # включение отображение сетки
+    # plt.plot(p_ser)  # построение графика
+    plt.plot(n_lst[50:101], k_arr[50:101])
+    plt.plot(n_lst[50:101], (_p_arr[50:101] - _p_arr.mean()) / _p_arr.std() * 50)
+    plt.legend(['k_arr', 'p_n'], loc="upper left")
+
+
+def calc_alg2(_p_arr, _mu_arr, di0):
+    """Расчет по алгоритму alg 2.1, на входе массивы p, mu и начальная инвестиция"""
+    n_max = len(_p_arr) - 1
+    # Ограничения на K
+    k_min = -10
+    k_max = 10
+    # Массивы
+    t_max = float(n_max)  # /100
+    t_arr = np.linspace(0., t_max, n_max + 1)
+    # dt = t_arr[1]-t_arr[0]
+    dt = 1
+    k_arr = np.zeros(n_max + 1)
+    dg_arr = np.zeros(n_max + 1)
+    di_arr = np.zeros(n_max + 1)
+    di_arr[0] = di0
+    # print('Starting alg0, I_0 = ', di0)
+    for i in range(1, n_max - 1):
+        des_str = ''
+
+
+
+        # if i==20:
+        #    print('_mu_arr[20] =', _mu_arr[20])
+
+
+
+
+
+
+        if math.fabs(_mu_arr[i]) <= .1:
+            k_arr[i] = 0.
+            dg_arr[i] = 0.
+            des_str = 'Nothing'
+            di_arr[i + 1] = 0.
+        else:
+            mu_normalized = _mu_arr[i] / 10
+            minus_eg_cur = functools.partial(minus_eg, _d_inv=di_arr[i], _mu=mu_normalized, _delta_t=dt)
+            k_cur = minimize_scalar(minus_eg_cur, bounds=(k_min, k_max), method='bounded').x
+            # Корректируем k по значению mu: умножаем его на |mu/12| (mu до нормализации)
+            k_cur *= math.fabs(mu_normalized) / 30
+            k_arr[i] = k_cur
+            # dg_arr[i] = k_cur / math.fabs(k_cur) * (_p_arr[i] - _p_arr[i - 1])
+            dg_arr[i] = k_cur * (_p_arr[i] - _p_arr[i - 1])
+
+            if dg_arr[i] < 20.:
+
+
+
+                # if i == 20:
+                #    print('I\'m here!')
+
+
+
+
+                k_arr[i] = 0.
+                dg_arr[i] = 0.
+                di_arr[i+1] = 0.
+                des_str = 'Nothing'
+            else:
+                if k_cur >= 0:
+                    des_str = 'Buy'
+                else:
+                    des_str = 'Sell'
+
+            # di_arr[i + 1] = di_arr[i] + k_arr[i] * dg_arr[i]
+
+            def sign(x):
+                if math.fabs(x) > 1.e-6:
+                    return x / math.fabs(x)
+                else:
+                    return 0.
+
+            di_arr[i + 1] = k_arr[i] * dg_arr[i]
+
+
+            # if i == 19:
+            #    print('di[19] =', di_arr[i+1])
+
+
+
+            if i <= 30:
+                # print(f'iter={i}, t={round(t_arr[i], 2)}, dI={round(di_arr[i], 4)}, mu={round(mu_normalized, 4)}',
+                #      f'g={round(dg_arr[i], 4)}, K={round(k_arr[i], 4)} -> {des_str}')
+                pass
+    dk_ser = pd.Series(k_arr[:-2], index=t_arr[:-2])
+    dg_ser = pd.Series(dg_arr[:-2], index=t_arr[:-2])
+    di_ser = pd.Series(di_arr[:-2], index=t_arr[:-2])
+    # print(di_arr)
+    plt.figure(figsize=(20, 3))
+
+    n_lst = list(range(len(_p_arr)))
+    plt.subplot(141)
+    plt.title("Price")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("p_n")  # ось ординат
+    plt.grid()  # включение отображение сетки
+    # plt.plot(p_ser)  # построение графика
+    plt.plot(n_lst, _p_arr)
+    plt.legend(['p_n'], loc="upper left")
+    plt.subplot(142)
+    plt.plot(dg_ser[:n_max - 2], marker='o')
+    plt.xlabel("t")
+    plt.ylabel("dg")
+    plt.title("Current profit")
+    plt.grid()
+    plt.subplot(143)
+    plt.plot(di_ser[:n_max - 2], marker='o')
+    plt.xlabel("t")
+    plt.ylabel("dI")
+    plt.title("Current investment")
+    plt.grid()
+    plt.subplot(144)
+    plt.plot(k_arr[:n_max - 2])
+    plt.xlabel("t")
+    plt.ylabel("K")
+    plt.title("PID Gain coefficient")
+    plt.grid()
+    plt.show()
+
+    plt.figure(figsize=(20, 3))
+    # plt.tight_layout()
+    plt.subplot(141)
+    plt.title("Trend modeling by first difference")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("mu")  # ось ординат
+    plt.grid()  # включение отображение сетки
+    plt.plot(n_lst, _mu_arr, color='orange')
+    plt.legend(['mu'], loc="upper left")
+    plt.subplot(142)
+    plt.plot(np.cumsum(dg_ser[:n_max - 2]), color='orange')
+    plt.xlabel("t")
+    plt.ylabel("g")
+    plt.title("Cumulative profit")
+    plt.grid()
+    plt.subplot(143)
+    plt.plot(np.cumsum(di_ser[:n_max - 2]), color='orange')
+    plt.xlabel("t")
+    plt.ylabel("I")
+    plt.title("Cumulative investment")
+    plt.grid()
+    plt.subplot(144)
+    plt.plot(k_arr[:n_max - 2])
+    plt.xlabel("t")
+    plt.ylabel("K")
+    plt.title("(technical plot 1)")
+    plt.grid()
+    # plt.subplots_adjust(wspace=0, hspace=0)
+    plt.show()
+
+    figure = plt.figure(figsize=(10, 3))
+    plt.title("Decision Buy/Sell/Do nothing (zoomed)")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("K_n")  # ось ординат
+    plt.grid()  # включение отображение сетки
+    # plt.plot(p_ser)  # построение графика
+    plt.plot(n_lst[50:101], k_arr[50:101])
+    plt.plot(n_lst[50:101], (_p_arr[50:101] - _p_arr.mean()) / _p_arr.std() * 50)
+    plt.legend(['k_arr', 'p_n'], loc="upper left")
+
+    # print(di_arr)
