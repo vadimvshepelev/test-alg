@@ -220,7 +220,8 @@ def minus_eg(k, _d_inv, _mu, _delta_t):
 
 
 def calc_alg0(_p_arr, _mu_arr, di0):
-    """Расчет по алгоритму alg 0.1, на входе массивы p, mu и начальная инвестиция"""
+    """Расчет по алгоритму alg 0.2, на входе массивы p, mu и начальная инвестиция"""
+    """TODO: коммичу в отдельный бранч в гите"""
     n_max = len(_p_arr) - 1
     # Ограничения на K
     k_min = -10
@@ -228,50 +229,45 @@ def calc_alg0(_p_arr, _mu_arr, di0):
     # Массивы
     t_max = float(n_max)  # /100
     t_arr = np.linspace(0., t_max, n_max + 1)
-    # dt = t_arr[1]-t_arr[0]
-    dt = 1
+    dt = 1.
     k_arr = np.zeros(n_max + 1)
     dg_arr = np.zeros(n_max + 1)
     di_arr = np.zeros(n_max + 1)
-    di_arr[0] = di0
+    di_arr[1] = di0
     # print('Starting alg0, I_0 = ', di0)
-    for i in range(1, n_max - 1):
+    for i in range(1, n_max-1):
         des_str = ''
+        mu_normalized = _mu_arr[i] / 10.
         if math.fabs(_mu_arr[i]) <= .1:
+            # di_arr[i] == ? (это определено на прошлом шаге)
             k_arr[i] = 0.
-            dg_arr[i] = 0.
             des_str = 'Nothing'
-            di_arr[i + 1] = 0.
+            dg_arr[i] = 0.
+            di_arr[i+1] = .01
         else:
-            mu_normalized = _mu_arr[i] / 10
+            # di_arr[i] == ? (это определено на прошлом шаге)
             minus_eg_cur = functools.partial(minus_eg, _d_inv=di_arr[i], _mu=mu_normalized, _delta_t=dt)
-            """k_line = np.linspace(k_min, k_max, 100)
-            f = np.array([minus_eg_cur(k)for k in k_line])
-            plt.plot(k_line, f)
-            plt.show()"""
             k_cur = minimize_scalar(minus_eg_cur, bounds=(k_min, k_max), method='bounded').x
             k_arr[i] = k_cur
-            dg_arr[i] = k_cur / math.fabs(k_cur) * (_p_arr[i] - _p_arr[i - 1])
-
-            if dg_arr[i] < 20:
-                k_arr[i] = 0.
-                dg_arr[i] = 0.
-                di_arr[i] = 0.
-                des_str = 'Nothing'
+            dg_arr[i] = k_cur / math.fabs(k_cur) * (_p_arr[i] - _p_arr[i-1])
+            # if dg_arr[i] < 20:
+            #    k_arr[i] = 0.
+            #    dg_arr[i+1] = 0.
+            #    di_arr[i+1] = 0.
+            #    des_str = 'Nothing'
+            # else:
+            if k_cur > 0:
+                des_str = 'Buy'
             else:
-                if k_cur >= 0:
-                    des_str = 'Buy'
-                else:
-                    des_str = 'Sell'
-            di_arr[i + 1] = di_arr[i] + k_arr[i] * dg_arr[i]
-            if True:
-                print(f'iter={i}, t={round(t_arr[i], 2)}, I={round(di_arr[i], 4)}, mu={round(mu_normalized, 4)}',
-                      f'g={round(dg_arr[i], 4)}, K={round(k_arr[i], 4)} -> {des_str}')
-                pass
+                des_str = 'Sell'
+            di_arr[i+1] = k_arr[i] * dg_arr[i]
+        if True:
+            # print(f'iter={i}, t={round(t_arr[i], 2)}, p={_p_arr[i]}, mu_n={round(mu_normalized, 4)}',
+            #       f'dI={round(di_arr[i], 4)}, g={round(dg_arr[i], 4)}, K={round(k_arr[i], 4)} -> {des_str}')
+            pass
     dk_ser = pd.Series(k_arr[:-2], index=t_arr[:-2])
     dg_ser = pd.Series(dg_arr[:-2], index=t_arr[:-2])
     di_ser = pd.Series(di_arr[:-2], index=t_arr[:-2])
-    # print(di_arr)
     plt.figure(figsize=(20, 3))
 
     n_lst = list(range(len(_p_arr)))
