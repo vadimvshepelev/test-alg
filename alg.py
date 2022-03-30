@@ -113,7 +113,7 @@ def load_test_data():
     p_init_si_21 = price_series_si_21[0]
     mu_arr_si_21 = np.diff(p_arr_si_21)
     mu_arr_si_21 = np.append(0., mu_arr_si_21)
-
+    """
     fig = plt.figure(figsize=(20, 10))
     n_lst = list(range(len(p_arr_arma)))
     plt.subplot(2, 5, 1)
@@ -132,6 +132,7 @@ def load_test_data():
     plt.grid()  # включение отображение сетки
     plt.plot(n_lst, mu_arr_arma, color='orange')
     plt.legend(['mu'], loc="upper left")
+    """
 
     n_lst = list(range(len(p_arr_stable)))
     plt.subplot(2, 5, 2)
@@ -204,9 +205,8 @@ def load_test_data():
     plt.grid()  # включение отображение сетки
     plt.plot(n_lst, mu_arr_si_21, color='orange')
     plt.legend(['mu'], loc="upper left")
-    fig.subplots_adjust(hspace=.2)
+    # fig.subplots_adjust(hspace=.2)
     plt.show()
-
     return p_arr_stable, mu_arr_stable, \
            p_arr_growth, mu_arr_growth, \
            p_arr_si_14, mu_arr_si_14, \
@@ -220,12 +220,15 @@ def minus_eg(k, _d_inv, _mu, _delta_t):
 
 
 def calc_alg0(_p_arr, _mu_arr, di0):
-    """Расчет по алгоритму alg 0.2, на входе массивы p, mu и начальная инвестиция"""
+    """Расчет по алгоритму alg 0.3, на входе массивы p, mu и начальная инвестиция"""
     """TODO: коммичу в отдельный бранч в гите"""
+
+    di_norm = 1000000.
+
     n_max = len(_p_arr) - 1
     # Ограничения на K
-    k_min = -10
-    k_max = 10
+    k_min = -10.
+    k_max = 10.
     # Массивы
     t_max = float(n_max)  # /100
     t_arr = np.linspace(0., t_max, n_max + 1)
@@ -233,23 +236,39 @@ def calc_alg0(_p_arr, _mu_arr, di0):
     k_arr = np.zeros(n_max + 1)
     dg_arr = np.zeros(n_max + 1)
     di_arr = np.zeros(n_max + 1)
-    di_arr[1] = di0
+    di_arr[1] = di0 / di_norm
     # print('Starting alg0, I_0 = ', di0)
     for i in range(1, n_max-1):
         des_str = ''
+        mu_factor = math.fabs(_mu_arr[i])/max(np.abs(_mu_arr[:i+1]))
         mu_normalized = _mu_arr[i] / 10.
-        if math.fabs(_mu_arr[i]) <= .1:
+        if math.fabs(_mu_arr[i]) < .1:
             # di_arr[i] == ? (это определено на прошлом шаге)
             k_arr[i] = 0.
             des_str = 'Nothing'
             dg_arr[i] = 0.
-            di_arr[i+1] = .01
+            di_arr[i] = 0.
+            di_arr[i+1] = di0 / di_norm
+        elif math.fabs(_mu_arr[i]) > 30.:
+            # di_arr[i] == ? (это определено на прошлом шаге)
+            k_arr[i] = 0.
+            des_str = 'Nothing'
+            dg_arr[i] = 0.
+            di_arr[i] = 0.
+            di_arr[i+1] = di0 / di_norm
         else:
             # di_arr[i] == ? (это определено на прошлом шаге)
+
+
+            vol = abs(di_arr[i]/_p_arr[i])
+
+
+
+
             minus_eg_cur = functools.partial(minus_eg, _d_inv=di_arr[i], _mu=mu_normalized, _delta_t=dt)
             k_cur = minimize_scalar(minus_eg_cur, bounds=(k_min, k_max), method='bounded').x
             k_arr[i] = k_cur
-            dg_arr[i] = k_cur / math.fabs(k_cur) * (_p_arr[i] - _p_arr[i-1])
+            dg_arr[i] = k_cur / math.fabs(k_cur) * (_p_arr[i] - _p_arr[i-1])     # * vol
             # if dg_arr[i] < 20:
             #    k_arr[i] = 0.
             #    dg_arr[i+1] = 0.
@@ -260,14 +279,16 @@ def calc_alg0(_p_arr, _mu_arr, di0):
                 des_str = 'Buy'
             else:
                 des_str = 'Sell'
-            di_arr[i+1] = k_arr[i] * dg_arr[i]
+            di_arr[i+1] = abs(mu_factor)*k_arr[i] * dg_arr[i] / di_norm
         if True:
-            # print(f'iter={i}, t={round(t_arr[i], 2)}, p={_p_arr[i]}, mu_n={round(mu_normalized, 4)}',
-            #       f'dI={round(di_arr[i], 4)}, g={round(dg_arr[i], 4)}, K={round(k_arr[i], 4)} -> {des_str}')
+            print(f'iter={i}, t={round(t_arr[i], 2)}, p={_p_arr[i]}, mu_n={round(mu_normalized, 4)}',
+                  f'mu_factor={round(mu_factor, 2)}, dI={di_arr[i]}, g={dg_arr[i]}, '
+                  f'K={round(k_arr[i], 4)} -> {des_str}')
             pass
     dk_ser = pd.Series(k_arr[:-2], index=t_arr[:-2])
     dg_ser = pd.Series(dg_arr[:-2], index=t_arr[:-2])
-    di_ser = pd.Series(di_arr[:-2], index=t_arr[:-2])
+    di_ser = pd.Series(di_arr[:-2]*di_norm, index=t_arr[:-2])
+    print('Итоговая прибыль:', dg_ser[len(dg_ser)-1])
     plt.figure(figsize=(20, 3))
 
     n_lst = list(range(len(_p_arr)))
@@ -292,10 +313,11 @@ def calc_alg0(_p_arr, _mu_arr, di0):
     plt.title("Current investment")
     plt.grid()
     plt.subplot(144)
-    plt.plot(k_arr[:n_max - 2])
+    plt.plot(di_ser[:n_max - 2], marker='o')
     plt.xlabel("t")
-    plt.ylabel("K")
-    plt.title("PID Gain coefficient")
+    plt.ylabel("dI_log")
+    plt.title("Logarythmic current investment")
+    plt.yscale('log')
     plt.grid()
     plt.show()
 
@@ -500,3 +522,10 @@ def calc_alg2(_p_arr, _mu_arr, di0):
     plt.legend(['k_arr', 'p_n'], loc="upper left")
 
     # print(di_arr)
+
+
+
+if __name__ == '__main__':
+    data_tuple = load_test_data()
+    calc_alg0(data_tuple[0], data_tuple[1], .01)
+
