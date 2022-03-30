@@ -220,8 +220,9 @@ def minus_eg(k, _d_inv, _mu, _delta_t):
 
 
 def calc_alg0(_p_arr, _mu_arr, di0):
-    """Расчет по алгоритму alg 0.3, на входе массивы p, mu и начальная инвестиция"""
-    """TODO: коммичу в отдельный бранч в гите"""
+    """Расчет по алгоритму alg 0.4, на входе массивы p, mu и начальная инвестиция
+    Учитываем лонги/шорты
+    TODO: коммичу в отдельный бранч в гите"""
 
     di_norm = 1000000.
 
@@ -238,51 +239,72 @@ def calc_alg0(_p_arr, _mu_arr, di0):
     di_arr = np.zeros(n_max + 1)
     di_arr[1] = di0 / di_norm
     # print('Starting alg0, I_0 = ', di0)
+
+    long_is_opened = False
+    short_is_opened = False
+    price_prev = 0.
+
     for i in range(1, n_max-1):
         des_str = ''
         mu_factor = math.fabs(_mu_arr[i])/max(np.abs(_mu_arr[:i+1]))
         mu_normalized = _mu_arr[i] / 10.
-        if math.fabs(_mu_arr[i]) < .1:
+        if short_is_opened:
+            des_str = 'Close short'
+            short_is_opened = False
+            k_cur = 1.
+            k_arr[i] = k_cur
+            dg_arr[i] = - (_p_arr[i] - price_prev)
+            di_arr[i + 1] = abs(mu_factor) * k_arr[i] * dg_arr[i] / di_norm
+        elif long_is_opened:
+            des_str = 'Close long'
+            long_is_opened = False
+            k_cur = -1.
+            k_arr[i] = k_cur
+            dg_arr[i] = _p_arr[i] - price_prev
+            di_arr[i + 1] = abs(mu_factor) * k_arr[i] * dg_arr[i] / di_norm
+        elif math.fabs(_mu_arr[i]) < .1:
             # di_arr[i] == ? (это определено на прошлом шаге)
             k_arr[i] = 0.
-            des_str = 'Nothing'
+            des_str = 'Hold'
+            # А можно и закрыть позицию!
             dg_arr[i] = 0.
             di_arr[i] = 0.
             di_arr[i+1] = di0 / di_norm
         elif math.fabs(_mu_arr[i]) > 30.:
             # di_arr[i] == ? (это определено на прошлом шаге)
             k_arr[i] = 0.
-            des_str = 'Nothing'
+            des_str = 'Hold'
+            # А можно и закрыть позицию!
             dg_arr[i] = 0.
             di_arr[i] = 0.
             di_arr[i+1] = di0 / di_norm
         else:
             # di_arr[i] == ? (это определено на прошлом шаге)
-
-
-            vol = abs(di_arr[i]/_p_arr[i])
-
-
-
-
             minus_eg_cur = functools.partial(minus_eg, _d_inv=di_arr[i], _mu=mu_normalized, _delta_t=dt)
             k_cur = minimize_scalar(minus_eg_cur, bounds=(k_min, k_max), method='bounded').x
             k_arr[i] = k_cur
-            dg_arr[i] = k_cur / math.fabs(k_cur) * (_p_arr[i] - _p_arr[i-1])     # * vol
+
             # if dg_arr[i] < 20:
             #    k_arr[i] = 0.
             #    dg_arr[i+1] = 0.
             #    di_arr[i+1] = 0.
             #    des_str = 'Nothing'
             # else:
-            if k_cur > 0:
-                des_str = 'Buy'
+
+            if k_cur < 0:
+                des_str = 'Open short'
+                short_is_opened = True
+                price_prev = _p_arr[i]
+                di_arr[i+1] = 1.
             else:
-                des_str = 'Sell'
-            di_arr[i+1] = abs(mu_factor)*k_arr[i] * dg_arr[i] / di_norm
+                des_str = 'Open long'
+                long_is_opened = True
+                price_prev = _p_arr[i]
+                dg_arr[i] = 0
+                di_arr[i+1] = 1.
         if True:
             print(f'iter={i}, t={round(t_arr[i], 2)}, p={_p_arr[i]}, mu_n={round(mu_normalized, 4)}',
-                  f'mu_factor={round(mu_factor, 2)}, dI={di_arr[i]}, g={dg_arr[i]}, '
+                  f'mu_factor={round(mu_factor, 2)}, dI={di_arr[i]}, dg={dg_arr[i]}, '
                   f'K={round(k_arr[i], 4)} -> {des_str}')
             pass
     dk_ser = pd.Series(k_arr[:-2], index=t_arr[:-2])
@@ -527,5 +549,5 @@ def calc_alg2(_p_arr, _mu_arr, di0):
 
 if __name__ == '__main__':
     data_tuple = load_test_data()
-    calc_alg0(data_tuple[0], data_tuple[1], .01)
+    calc_alg0(data_tuple[0], data_tuple[1], 1000000.)
 
