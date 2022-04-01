@@ -251,37 +251,43 @@ def calc_alg0(_p_arr, _mu_arr, di0):
         if short_is_opened:
             des_str = 'Close short'
             short_is_opened = False
-            k_cur = 1.
+            k_cur = 10.
             k_arr[i] = k_cur
             dg_arr[i] = - (_p_arr[i] - price_prev)
-            di_arr[i + 1] = abs(mu_factor) * k_arr[i] * dg_arr[i] / di_norm
+            di_arr[i+1] = k_arr[i] * dg_arr[i] / di_norm
         elif long_is_opened:
             des_str = 'Close long'
             long_is_opened = False
-            k_cur = -1.
+            k_cur = -10.
             k_arr[i] = k_cur
             dg_arr[i] = _p_arr[i] - price_prev
-            di_arr[i + 1] = abs(mu_factor) * k_arr[i] * dg_arr[i] / di_norm
+            di_arr[i+1] = k_arr[i] * dg_arr[i] / di_norm
         elif math.fabs(_mu_arr[i]) < .1:
             # di_arr[i] == ? (это определено на прошлом шаге)
             k_arr[i] = 0.
             des_str = 'Hold'
             # А можно и закрыть позицию!
             dg_arr[i] = 0.
+            di_arr[i+1] = di_arr[i]
             di_arr[i] = 0.
-            di_arr[i+1] = di0 / di_norm
         elif math.fabs(_mu_arr[i]) > 30.:
             # di_arr[i] == ? (это определено на прошлом шаге)
             k_arr[i] = 0.
             des_str = 'Hold'
             # А можно и закрыть позицию!
             dg_arr[i] = 0.
+            di_arr[i+1] = di_arr[i]
             di_arr[i] = 0.
-            di_arr[i+1] = di0 / di_norm
+        # elif math.fabs(dg_arr[i-1]) > 1.e-3 and dg_arr[i-1] < 20.:
+        #    k_arr[i] = 0.
+        #    des_str = 'Hold'
+        #    dg_arr[i] = 0.
+        #    di_arr[i+1] = di_arr[i]
+        #    di_arr[i] = 0.
         else:
             # di_arr[i] == ? (это определено на прошлом шаге)
             minus_eg_cur = functools.partial(minus_eg, _d_inv=di_arr[i], _mu=mu_normalized, _delta_t=dt)
-            k_cur = minimize_scalar(minus_eg_cur, bounds=(k_min, k_max), method='bounded').x
+            k_cur = - minimize_scalar(minus_eg_cur, bounds=(k_min, k_max), method='bounded').x
             k_arr[i] = k_cur
 
             # if dg_arr[i] < 20:
@@ -295,13 +301,14 @@ def calc_alg0(_p_arr, _mu_arr, di0):
                 des_str = 'Open short'
                 short_is_opened = True
                 price_prev = _p_arr[i]
-                di_arr[i+1] = 1.
+                dg_arr[i] = 0
+                di_arr[i+1] = -di_arr[i]
             else:
                 des_str = 'Open long'
                 long_is_opened = True
                 price_prev = _p_arr[i]
                 dg_arr[i] = 0
-                di_arr[i+1] = 1.
+                di_arr[i+1] = -di_arr[i]
         if True:
             print(f'iter={i}, t={round(t_arr[i], 2)}, p={_p_arr[i]}, mu_n={round(mu_normalized, 4)}',
                   f'mu_factor={round(mu_factor, 2)}, dI={di_arr[i]}, dg={dg_arr[i]}, '
