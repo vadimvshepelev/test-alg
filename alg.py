@@ -601,6 +601,224 @@ def calc_k_dd(_p_arr: np.array, _mu_arr: np.array):
 
 def calc_alg5(_p_arr):
     """Полный PIDD-регулятор"""
+    """Расчет по алгоритму alg 0.5, на входе массивы p, mu и начальная инвестиция
+        Учитываем лонги/шорты
+        TODO: коммичу в отдельный бранч в гите"""
+
+    di_norm = 1000000.
+
+    n_max = len(_p_arr) - 1
+    # Ограничения на K
+    k_min = -10.
+    k_max = 10.
+    # Массивы
+    t_max = float(n_max)  # /100
+    t_arr = np.linspace(0., t_max, n_max + 1)
+    dt = 1.
+    k_arr = np.zeros(n_max + 1)
+    dg_arr = np.zeros(n_max + 1)
+    di_arr = np.zeros(n_max + 1)
+    di_arr[1] = di0 / di_norm
+    # print('Starting alg0, I_0 = ', di0)
+
+    history = []
+
+    long_is_opened = False
+    short_is_opened = False
+    price_prev = _p_arr[0]
+
+    for i in range(1, n_max - 1):
+
+        if i == 24:
+            q = 1
+            pass
+
+        des_str = ''
+        mu_factor = math.fabs(_mu_arr[i]) / max(np.abs(_mu_arr[:i + 1]))
+        mu_normalized = _mu_arr[i] / 10.
+        if short_is_opened:
+            dg_pos = - (_p_arr[i] - price_prev)
+            if dg_pos > 5. or len(history) > 1 or i == len(_p_arr) - 1:
+                des_str = 'Close short'
+                short_is_opened = False
+                k_cur = 10.
+                k_arr[i] = k_cur
+                dg_arr[i] = dg_pos
+                di_arr[i + 1] = k_arr[i] * dg_arr[i] / di_norm
+                price_prev = _p_arr[i]
+            else:
+                k_arr[i] = 0.
+                des_str = 'Hold'
+                dg_arr[i] = 0.
+                di_arr[i + 1] = di_arr[i]
+                di_arr[i] = 0.
+                history.append(dg_pos)
+        elif long_is_opened:
+            dg_pos = _p_arr[i] - price_prev
+            if dg_pos > 5. or len(history) > 1 or i == len(_p_arr) - 3:
+                des_str = 'Close long'
+                long_is_opened = False
+                k_cur = -10.
+                k_arr[i] = k_cur
+                dg_arr[i] = dg_pos
+                di_arr[i + 1] = k_arr[i] * dg_arr[i] / di_norm
+                price_prev = _p_arr[i]
+            else:
+                k_arr[i] = 0.
+                des_str = 'Hold'
+                dg_arr[i] = 0.
+                di_arr[i + 1] = di_arr[i]
+                di_arr[i] = 0.
+                history.append(dg_pos)
+        elif math.fabs(_mu_arr[i]) < .1:
+            # di_arr[i] == ? (это определено на прошлом шаге)
+            k_arr[i] = 0.
+            des_str = 'Hold'
+            # А можно и закрыть позицию!
+            dg_arr[i] = 0.
+            di_arr[i + 1] = di_arr[i]
+            di_arr[i] = 0.
+            price_prev = _p_arr[i]
+        elif math.fabs(_mu_arr[i]) > 30.:
+            k_arr[i] = 0.
+            des_str = 'Hold'
+            dg_arr[i] = 0.
+            di_arr[i + 1] = di_arr[i]
+            di_arr[i] = 0.
+            price_prev = _p_arr[i]
+        # elif i > 2 and dg_arr[i-1] < dg_arr[i-3] < 0.:
+        #    k_arr[i] = 0.
+        #    des_str = 'Hold'
+        #    dg_arr[i] = 0.
+        #    di_arr[i + 1] = di_arr[1]
+        #    di_arr[i] = 0.
+        else:
+            # di_arr[i] == ? (это определено на прошлом шаге)
+            minus_eg_cur = functools.partial(minus_eg, _d_inv=di_arr[i], _mu=mu_normalized, _delta_t=dt)
+            k_cur = - minimize_scalar(minus_eg_cur, bounds=(k_min, k_max), method='bounded').x
+            k_arr[i] = k_cur
+
+            # if dg_arr[i] < 20:
+            #    k_arr[i] = 0.
+            #    dg_arr[i+1] = 0.
+            #    di_arr[i+1] = 0.
+            #    des_str = 'Nothing'
+            # else:
+
+            if k_cur < 0:
+                des_str = 'Open short'
+                short_is_opened = True
+                history = []
+                price_prev = _p_arr[i]
+                dg_arr[i] = 0
+                di_arr[i + 1] = -di_arr[i]
+            else:
+                des_str = 'Open long'
+                history = []
+                long_is_opened = True
+                price_prev = _p_arr[i]
+                dg_arr[i] = 0
+                di_arr[i + 1] = -di_arr[i]
+        if True:
+            print(f'iter={i}, t={round(t_arr[i], 2)}, p={_p_arr[i]}, mu_n={round(mu_normalized, 4)}',
+                  f'mu_factor={round(mu_factor, 2)}, dI={di_arr[i]}, dg={dg_arr[i]}, '
+                  f'K={round(k_arr[i], 4)} -> {des_str}')
+            pass
+
+    dk_ser = pd.Series(k_arr[:-2], index=t_arr[:-2])
+    dg_ser = pd.Series(dg_arr[:-2], index=t_arr[:-2])
+    di_ser = pd.Series(di_arr[:-2] * di_norm, index=t_arr[:-2])
+    profit_ser = np.cumsum(dg_ser[:n_max - 2])
+    profit = profit_ser[len(profit_ser) - 1]
+    print('Заработано:', profit)
+    plt.figure(figsize=(20, 3))
+    n_lst = list(range(len(_p_arr)))
+    plt.subplot(141)
+    plt.title("Price")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("p_n")  # ось ординат
+    plt.grid()  # включение отображение сетки
+    # plt.plot(p_ser)  # построение графика
+    plt.plot(n_lst, _p_arr)
+    plt.legend(['p_n'], loc="upper left")
+    plt.subplot(142)
+    plt.plot(dg_ser[:n_max - 2], marker='o')
+    plt.xlabel("t")
+    plt.ylabel("dg")
+    plt.title("Current profit")
+    plt.grid()
+    plt.subplot(143)
+    plt.plot(di_ser[:n_max - 2], marker='o')
+    plt.xlabel("t")
+    plt.ylabel("dI")
+    plt.title("Current investment")
+    plt.grid()
+    plt.subplot(144)
+    plt.plot(di_ser[:n_max - 2], marker='o')
+    plt.xlabel("t")
+    plt.ylabel("dI_log")
+    plt.title("Logarythmic current investment")
+    plt.yscale('log')
+    plt.grid()
+    plt.show()
+
+    plt.figure(figsize=(20, 3))
+    # plt.tight_layout()
+    plt.subplot(141)
+    plt.title("Trend modeling by first difference")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("mu")  # ось ординат
+    plt.grid()  # включение отображение сетки
+    plt.plot(n_lst, _mu_arr, color='orange')
+    plt.legend(['mu'], loc="upper left")
+    plt.subplot(142)
+    plt.plot(np.cumsum(dg_ser[:n_max - 2]), color='orange')
+    plt.xlabel("t")
+    plt.ylabel("g")
+    plt.title("Cumulative profit")
+    plt.grid()
+    plt.subplot(143)
+    plt.plot(np.cumsum(di_ser[:n_max - 2]), color='orange')
+    plt.xlabel("t")
+    plt.ylabel("I")
+    plt.title("Cumulative investment")
+    plt.grid()
+    plt.subplot(144)
+    plt.plot(k_arr[:n_max - 2])
+    plt.xlabel("t")
+    plt.ylabel("K")
+    plt.title("(technical plot 1)")
+    plt.grid()
+    # plt.subplots_adjust(wspace=0, hspace=0)
+    plt.show()
+
+    figure = plt.figure(figsize=(10, 3))
+    plt.title("Decision Buy/Sell/Do nothing (zoomed)")  # заголовок
+    plt.xlabel("n")  # ось абсцисс
+    plt.ylabel("K_n")  # ось ординат
+    plt.grid()  # включение отображение сетки
+    # plt.plot(p_ser)  # построение графика
+    plt.plot(n_lst[50:101], k_arr[50:101])
+    plt.plot(n_lst[50:101], (_p_arr[50:101] - _p_arr.mean()) / _p_arr.std() * 50)
+    plt.legend(['k_arr', 'p_n'], loc="upper left")
+    return profit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == '__main__':
