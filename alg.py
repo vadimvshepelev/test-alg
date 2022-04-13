@@ -561,23 +561,30 @@ def calc_alg2(_p_arr, _mu_arr, di0):
     plt.legend(['k_arr', 'p_n'], loc="upper left")
 
 
-def calc_alg5(_p_arr: np.array, output_flag=True):
+def calc_alg5(_p_arr: np.array, output_flag=True, trend=False, i_const=0., d_const=0., dd_const=0.):
     """Полный PIDD-регулятор"""
     """Расчет по алгоритму alg 0.5, на входе массивы p, mu и начальная инвестиция
         Учитываем лонги/шорты
         TODO: коммичу в отдельный бранч в гите"""
-    # Настроечные параметры
-    mu_min = 0. #.01    # .1
-    mu_max = .03
-    # Для интегрального члена
-    n_max = len(_p_arr)
     # Время для биржи с фьючерсом рубль-доллар -- 14 часов
     # Для биткоина будет 24 часа
-    t_max = 14.*3600
+    n_max = len(_p_arr)
+    t_max = 14. * 3600
+    if n_max > 500:
+        t_max = 24. * 3600
     t_arr = np.linspace(0., t_max, n_max)
     dt = t_arr[1] - t_arr[0]
+    # Настроечные параметры
+    mu_min = .1
+    mu_max = 30.
+    if trend:
+        mu_min /= dt
+        mu_max /= dt
+    # Для интегрального члена
     dg_diff_prev = 0.
     mu_arr = np.zeros(n_max)
+    if not trend:
+        mu_arr = np.array([_p_arr[i]-_p_arr[i-1] if i > 0 else 0. for i in range(n_max)])
     dmu_arr = np.zeros(n_max)
     k_arr = np.zeros(n_max)
     k_i_arr = np.zeros(n_max)
@@ -592,32 +599,28 @@ def calc_alg5(_p_arr: np.array, output_flag=True):
     price_prev = _p_arr[0]
     # Main cycle
     for i in range(1, n_max-1):
-        if i > 5:
+        if trend and i > 5:
             _, gdp_trend = sm.tsa.filters.hpfilter(_p_arr[:i+1])
-            # _, gdp_trend = sm.tsa.filters.hpfilter(_p_arr)
-            mu_arr[i] = (gdp_trend[i] - gdp_trend[i-1])/dt
-            dmu_arr[i] = (mu_arr[i] - mu_arr[i-1])/dt
+            mu_arr[i] = (gdp_trend[i] - gdp_trend[i-1]) / dt
+            dmu_arr[i] = (mu_arr[i] - mu_arr[i-1]) / dt
         des_str = ''
         k = 0.
         if i == n_max-1:
             k_arr[i], k_i_arr[i], k_d_arr[i], k_dd_arr[i], dg_arr[i], di_arr[i] = 0., 0., 0., 0., 0., 0.
             break
         # Integral part
-        k_i_const = 0.
         integ_sum = 0.
-        k_i_arr[i] = 0.
+        k_i_arr[i] = i_const
         if i > 10:
-            k_i_arr[i] = k_i_const
             coef_arr = np.array([math.exp(float(-j)/10.) for j in range(10, -1, -1)])
             for cnt in range(10, -1, -1):
                 # print(i, cnt, i-cnt, 10-cnt)
                 integ_sum += dg_arr[i - cnt] * coef_arr[10 - cnt]
         # Differential part
-        k_d_const = 0.
-        k_d_const = 0.
+        k_d_const = 1.
         k_d_arr[i] = k_d_const
         # Double-differential part
-        k_dd_const = 0.
+        k_dd_const = 1.
         k_dd_arr[i] = k_dd_const
         # Proportional part
         k_p_const = 1.
@@ -666,13 +669,13 @@ def calc_alg5(_p_arr: np.array, output_flag=True):
                 dg_arr[i] = 0.
                 di_arr[i+1] = 1.
                 history.append(dg_pos)
-        elif math.fabs(mu_arr[i]) > 1.:
+        elif math.fabs(mu_arr[i]) > mu_max:
             des_str = 'Hold'
             k_arr[i] = 0.
             dg_arr[i] = 0.
             di_arr[i+1] = 1.
         else:
-            if di_arr[i] > 0. and mu_arr[i] > 0. and dmu_arr[i] > 0.:
+            if di_arr[i] > 0. * mu_arr[i] > 0.:
                 des_str = 'Open long'
                 history = []
                 long_is_opened = True
@@ -680,7 +683,7 @@ def calc_alg5(_p_arr: np.array, output_flag=True):
                 price_prev = _p_arr[i]
                 dg_arr[i] = 0
                 di_arr[i+1] = -1.
-            elif di_arr[i] < 0. and mu_arr[i] < 0. and dmu_arr[i] < 0.:
+            elif di_arr[i] * mu_arr[i] < 0.:
                 des_str = 'Open short'
                 short_is_opened = True
                 k_arr[i] = -1.
@@ -688,22 +691,6 @@ def calc_alg5(_p_arr: np.array, output_flag=True):
                 price_prev = _p_arr[i]
                 dg_arr[i] = 0
                 di_arr[i+1] = 1.
-                """elif di_arr[i] < 0. and mu_arr[i] < 0. and dmu_arr[i] > 0.:
-                des_str = 'Open long'
-                history = []
-                long_is_opened = True
-                k_arr[i] = 1.
-                price_prev = _p_arr[i]
-                dg_arr[i] = 0
-                di_arr[i+1] = -1.
-                elif di_arr[i] > 0. and mu_arr[i] > 0. and dmu_arr[i] < 0.:
-                des_str = 'Open short'
-                short_is_opened = True
-                k_arr[i] = -1.
-                history = []
-                price_prev = _p_arr[i]
-                dg_arr[i] = 0
-                di_arr[i+1] = 1."""
             else:
                 des_str = 'Hold'
                 k_arr[i] = 0.
@@ -741,6 +728,7 @@ def visualize(p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, 
     ax[0][0].set_ylabel("p")  # ось ординат
     ax[0][0].plot(p_ser)
     ax[0][0].grid()
+
 
     ax[1][0].set_title("Trend")
     ax[1][0].set_xlabel("t")  # ось абсцисс
@@ -813,7 +801,7 @@ def visualize(p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, 
 
 if __name__ == '__main__':
     data_tuple = load_test_data()
-    res_tpl = calc_alg5(data_tuple[2], output_flag=True)
+    res_tpl = calc_alg5(data_tuple[0], output_flag=True)
     visualize(*res_tpl)
 
 
