@@ -617,11 +617,9 @@ def calc_alg5(_p_arr: np.array, output_flag=True, trend=False, i_const=0., d_con
                 # print(i, cnt, i-cnt, 10-cnt)
                 integ_sum += dg_arr[i - cnt] * coef_arr[10 - cnt]
         # Differential part
-        k_d_const = 1.
-        k_d_arr[i] = k_d_const
+        k_d_arr[i] = d_const
         # Double-differential part
-        k_dd_const = 1.
-        k_dd_arr[i] = k_dd_const
+        k_dd_arr[i] = dd_const
         # Proportional part
         k_p_const = 1.
         # Decision part
@@ -714,7 +712,7 @@ def calc_alg5(_p_arr: np.array, output_flag=True, trend=False, i_const=0., d_con
     i_ser = pd.Series(np.cumsum(di_ser), index=t_ticks_arr)
     profit_ser = pd.Series(np.cumsum(dg_ser), index=t_ticks_arr)
     profit = profit_ser.iloc[-1]
-    print('Заработано:', profit)
+    # print('Заработано:', profit)
     return p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, k_i_ser, k_d_ser, k_dd_ser
 
 
