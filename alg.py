@@ -14,7 +14,7 @@ def func_1():
     """Функция из первой ячейки, подбирает АРМА-параметры к синусоиде со случайным шумом"""
     n_max = 102
     # Задаем ряд
-    price_ser_src = pd.Series([sin(x) + 10 * random() for x in range(1, n_max)])
+    price_ser_src = pd.Series([math.sin(x) + 10 * random() for x in range(1, n_max)])
     # p_ser = price_ser_src[::5]
     # Находим mu (тренд)
     # Простой способ -- первая разность
@@ -798,9 +798,9 @@ def visualize(p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, 
     plt.show()
 
 
-def calc_hybrid_alg(_p_arr: np.array, time=14):
+def calc_hybrid_alg(_p_arr: np.array, output_flag=True, time=14):
     """Тестирование PIDD-алгоритма на >200 различных конфигурациях параметра
-    Расчет по алгоритму alg 0.5, на входе массивы p, mu и начальная инвестиция"""
+    Расчет по алгоритму alg 0.5, на входе массив p и количество часов рабоыт биржи (разное для фьючерсов и биткойна)"""
     # Время для биржи с фьючерсом рубль-доллар -- 14 часов
     # Для биткоина будет 24 часа
     n_max = len(_p_arr)
@@ -829,15 +829,9 @@ def calc_hybrid_alg(_p_arr: np.array, time=14):
     di_arr = np.zeros(n_max)
     di_arr[1] = 1.
     history = []
-    long_is_opened = False
-    short_is_opened = False
-    price_prev = _p_arr[0]
-
-    output_flag = True
-    des_str = ''
+    des_str, state = '', 'none'
     alg_id_tpl = (True, 1., 1.)
-
-# Main cycle
+    # Main cycle
     for i in range(1, n_max - 1):
         if i == n_max - 1:
             k_arr[i], k_i_arr[i], k_d_arr[i], k_dd_arr[i], dg_arr[i], di_arr[i] = 0., 0., 0., 0., 0., 0.
@@ -850,7 +844,8 @@ def calc_hybrid_alg(_p_arr: np.array, time=14):
             # d2trend_arr[i] = (dtrend_arr[i] - dtrend_arr[i-1]) / dt
         dgm = 0.
         # for trend_flag, k_i, k_d in product([True, False], np.linspace(-1., 1., 11), np.linspace(-1., 1., 11)):
-        for trend_flag, k_i, k_d in product([True], [1.], [1.]):
+        alg_env_tpl_max = tuple()
+        for trend_flag, k_i, k_d in product([True, False], [-1., 1.], [-1., 1.]):
             alpha_tpl = (1., k_i, k_d, 1.)
             if not trend_flag:
                 mu_arr = diff_arr
@@ -863,17 +858,21 @@ def calc_hybrid_alg(_p_arr: np.array, time=14):
                 mu_min = trend_min
                 mu_max = trend_max
             data_dct = {'p': _p_arr, 'mu': mu_arr, 'dmu': dmu_arr, 'di': di_arr, 'dg': dg_arr}
-            params_dct = {'dt': dt, 'mu_min': mu_min, 'mu_max': mu_max, 'history': history, 'price_prev': price_prev,
-                          'long_is_opened': long_is_opened, 'short_is_opened': short_is_opened}
+            params_dct = {'dt': dt, 'mu_min': mu_min, 'mu_max': mu_max, 'history': history, 'state': state}
+            # alg_env == (des_str, state, dg_new, di_new, di_next, history)
             alg_env_tpl = calc_step(i, alpha_tpl, data_dct, params_dct)
-            if dg_arr[i] > dgm:
-                dgm = dg_arr[i]
+            # print(f'Алгоритм с k_i={k_i}, k_d={k_d}, trend={trend_flag} дает на этом шаге dg={alg_env_tpl[2]} прибыли',
+            #      f'и предлагает решение {alg_env_tpl[0]}')
+            if alg_env_tpl[2] >= dgm:
+                dgm = alg_env_tpl[2]
                 alg_id_tpl = trend_flag, k_i, k_d
+                alg_env_tpl_max = alg_env_tpl[:]
                 # des_str, dg_arr[i], di_arr[i], di_arr[i + 1], price_prev, history, long_is_opened, short_is_opened
         dg_max_arr[i] = dgm
         trend_flag, k_i_arr[i], k_d_arr[i] = alg_id_tpl
-        des_str, dg_arr[i], di_arr[i], di_arr[i+1], price_prev, history, long_is_opened, short_is_opened = alg_env_tpl
+        des_str, state, dg_arr[i], di_arr[i], di_arr[i+1], history = alg_env_tpl_max
         if output_flag:
+            print(f'Выбран алгоритм с k_i={k_i}, k_d={k_d}, trend={trend_flag} и решением {des_str}')
             print(f'iter={i}, t={round(t_arr[i] / 3600., 2)} p={_p_arr[i]} diff={round(diff_arr[i], 4)}',
                   f'ddiff={round(dmu_arr[i], 4)} dtr={round(dtrend_arr[i], 4)} d2tr={round(d2trend_arr[i], 4)}',
                   f'dI={round(di_arr[i], 4)} dg={dg_arr[i]}, dg_max={round(dg_max_arr[i], 4)} k={round(k_arr[i], 4)}',
@@ -892,18 +891,31 @@ def calc_hybrid_alg(_p_arr: np.array, time=14):
     i_ser = pd.Series(np.cumsum(di_ser), index=t_ticks_arr)
     profit_ser = pd.Series(np.cumsum(dg_ser), index=t_ticks_arr)
     profit = profit_ser.iloc[-1]
-    print('Заработано:', profit)
+    if output_flag:
+        print('Заработано:', profit)
     return p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, k_i_ser, k_d_ser, k_dd_ser
 
 
 def calc_step(i, alpha_tpl, data_dct, params_dct):
+    """
+    Один шаг алгоритма. Получаем на вход номер шага и данные.
+    """
     p, mu, dmu, di, dg = data_dct['p'], data_dct['mu'], data_dct['dmu'], data_dct['di'], data_dct['dg']
     dt, mu_min, mu_max = params_dct['dt'], params_dct['mu_min'], params_dct['mu_max']
-    history, price_prev = params_dct['history'], params_dct['price_prev']
-    long_is_opened, short_is_opened = params_dct['long_is_opened'], params_dct['short_is_opened']
+    history, state = params_dct['history'], params_dct['state']
     alpha_p, alpha_i, alpha_d, alpha_dd = alpha_tpl
-    di_new = di[i]
-    # Proportional part
+    di_new, di_next = di[i], 0.
+    des_str = ''
+    # Производные прибыли dg для управления
+    dg_diff = 0.
+    dg_diff_prev = 0.
+    if i > 1:
+        dg_diff = (dg[i-1] - dg[i-2]) / dt
+    if i > 2:
+        dg_diff_prev = (dg[i-2] - dg[i-3]) / dt
+    dg_diff_diff = (dg_diff - dg_diff_prev) / dt
+    dg_pos = 0.
+   # Proportional part
     k_p = alpha_p
     # Integral part
     integ_sum = 0.
@@ -917,89 +929,67 @@ def calc_step(i, alpha_tpl, data_dct, params_dct):
     # Double-differential part
     k_dd = alpha_dd
     # Decision part
-    if short_is_opened:
-        dg_pos = - (p[i] - price_prev)
-        if dg_pos > 0. or len(history) > 1:
-            des_str = 'Close short'
-            short_is_opened = False
-            k_i = 1.
+    if state == 'short opened':
+        dg_pos = - (p[i] - history[0])
+        if dg_pos > 0. or len(history) > 2:
+            des_str, state = 'Close short', 'none'
+            k_p = 1.
             dg_new = dg_pos
-            dg_diff = (dg[i] - dg[i-1]) / dt
-            dg_diff_prev = 0
-            if i > 1:
-                dg_diff_prev = (dg[i-1] - dg[i-2]) / dt
-            dg_diff_diff = (dg_diff - dg_diff_prev) / dt
             di_next = \
-                k_p * dg[i] + \
+                k_p * dg_new + \
                 k_i * integ_sum + \
                 k_d * dg_diff + \
                 k_dd * dg_diff_diff
-            price_prev = p[i]
+            history = []
         else:
+            des_str, state = 'Hold', 'none'
             k_p = 0.
-            des_str = 'Hold'
             dg_new = 0.
-            di_next = 1.
-            history.append(dg_pos)
-    elif long_is_opened:
-        dg_pos = p[i] - price_prev
-        if dg_pos > 0. or len(history) > 1:
-            des_str = 'Close long'
-            long_is_opened = False
+            di_new, di_next = 0., di_new
+            history.append(p[i])
+    elif state == 'long opened':
+        if dg_pos > 0. or len(history) > 2:
+            dg_pos = p[i] - history[0]
+            des_str, state = 'Close long', 'none'
             k_p = -1.
             dg_new = dg_pos
-            dg_diff = (dg[i] - dg[i-1]) / dt
-            dg_diff_prev = 0
-            if i > 1:
-                dg_diff_prev = (dg[i-1] - dg[i-2]) / dt
-            dg_diff_diff = (dg_diff - dg_diff_prev) / dt
             di_next = \
-                k_p * dg[i] + \
+                k_p * dg_new + \
                 k_i * integ_sum + \
                 k_d * dg_diff + \
                 k_dd * dg_diff_diff
-            price_prev = p[i]
+            history = []
         else:
-            des_str = 'Hold'
+            des_str, state = 'Hold', 'none'
             k_p = 0.
             dg_new = 0.
-            di_next = 1.
-            history.append(dg_pos)
-    elif math.fabs(mu[i]) > mu_max:
-        des_str = 'Hold'
+            di_new, di_next = 0, di_new
+            history.append(p[i])
+    elif mu_min < math.fabs(mu[i]) < mu_max:
+        if di[i] * mu[i] > 0.:
+            des_str, state = 'Open long', 'long opened'
+            k_p = 1.
+        elif di[i] * mu[i] < 0.:
+            des_str, state = 'Open short', 'short opened'
+            k_p = -1.
+        else:
+            raise ValueError('Какая-то неведомая хрень')
+        dg_new = 0.
+        di_next = - di_new
+        history = [p[i]]
+    else:
+        des_str, state = 'Hold', 'none'
         k_p = 0.
         dg_new = 0.
-        di_next = 1.
-    else:
-        if di[i] > 0. * mu[i] > 0.:
-            des_str = 'Open long'
-            history = []
-            long_is_opened = True
-            k_p = 1.
-            price_prev = p[i]
-            dg_new = 0
-            di_next = -1.
-        elif di[i] * mu[i] < 0.:
-            des_str = 'Open short'
-            short_is_opened = True
-            k_p = -1.
-            history = []
-            price_prev = p[i]
-            dg_new = 0
-            di_next = 1.
-        else:
-            des_str = 'Hold'
-            k_p = 0.
-            dg_new = 0.
-            di_next = 1.
-            di_new = 0.
-    return des_str, dg_new, di_new, di_next, price_prev, history, long_is_opened, short_is_opened
+        di_new, di_next = 0., 1.
+        history = []
+    return des_str, state, dg_new, di_new, di_next, history
 
 
 if __name__ == '__main__':
     data_tuple = load_test_data()
     # res_tpl = calc_alg5(data_tuple[0], output_flag=True)
-    res_tpl = calc_hybrid_alg(data_tuple[0])
+    res_tpl = calc_hybrid_alg(data_tuple[0], output_flag=True)
     visualize(*res_tpl)
 
 
