@@ -843,13 +843,14 @@ def calc_hybrid_alg(_p_arr: np.array, time=14):
             k_arr[i], k_i_arr[i], k_d_arr[i], k_dd_arr[i], dg_arr[i], di_arr[i] = 0., 0., 0., 0., 0., 0.
             break
         if i > 5:
-            # _, gdp_trend = sm.tsa.filters.hpfilter(_p_arr[:i + 1])
-            # dtrend_arr[i] = (gdp_trend[i] - gdp_trend[i-1]) / dt
-            # d2trend_arr[i] = (dtrend_arr[i] - dtrend_arr[i-1]) / dt
-            dtrend_arr[i] = (_p_arr[i] - _p_arr[i-1]) / dt
+            _, gdp_trend = sm.tsa.filters.hpfilter(_p_arr[:i + 1])
+            dtrend_arr[i] = (gdp_trend[i] - gdp_trend[i-1]) / dt
             d2trend_arr[i] = (dtrend_arr[i] - dtrend_arr[i-1]) / dt
+            # dtrend_arr[i] = (_p_arr[i] - _p_arr[i-1]) / dt
+            # d2trend_arr[i] = (dtrend_arr[i] - dtrend_arr[i-1]) / dt
         dgm = 0.
-        for trend_flag, k_i, k_d in product([True, False], np.linspace(-1., 1., 11), np.linspace(-1., 1., 11)):
+        # for trend_flag, k_i, k_d in product([True, False], np.linspace(-1., 1., 11), np.linspace(-1., 1., 11)):
+        for trend_flag, k_i, k_d in product([True], [1.], [1.]):
             alpha_tpl = (1., k_i, k_d, 1.)
             if not trend_flag:
                 mu_arr = diff_arr
@@ -891,7 +892,7 @@ def calc_hybrid_alg(_p_arr: np.array, time=14):
     i_ser = pd.Series(np.cumsum(di_ser), index=t_ticks_arr)
     profit_ser = pd.Series(np.cumsum(dg_ser), index=t_ticks_arr)
     profit = profit_ser.iloc[-1]
-    # print('Заработано:', profit)
+    print('Заработано:', profit)
     return p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, k_i_ser, k_d_ser, k_dd_ser
 
 
@@ -1000,6 +1001,7 @@ if __name__ == '__main__':
     # res_tpl = calc_alg5(data_tuple[0], output_flag=True)
     res_tpl = calc_hybrid_alg(data_tuple[0])
     visualize(*res_tpl)
+
 
 
 
