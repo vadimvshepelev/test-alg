@@ -717,7 +717,7 @@ def calc_alg5(_p_arr: np.array, output_flag=True, trend=False, i_const=0., d_con
     return p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, k_i_ser, k_d_ser, k_dd_ser
 
 
-def visualize(p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, k_i_ser, k_d_ser, k_dd_ser):
+def visualize(p_ser, diff_ser, dg_max_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, k_i_ser, k_d_ser, k_dd_ser):
     # fig, ((ax_p, ax_dg, ax_di, ax_k), (ax_mu, ax_profit, ax_i, ax_k)) = plt.subplots(figsize=(20, 3))
     n_max = len(p_ser)
     fig, ax = plt.subplots(figsize=(18, 10), nrows=4, ncols=3)
@@ -729,16 +729,16 @@ def visualize(p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, 
     ax[0][0].grid()
 
 
-    ax[1][0].set_title("Trend")
+    ax[1][0].set_title("Difference")
     ax[1][0].set_xlabel("t")  # ось абсцисс
-    ax[1][0].set_ylabel("mu")  # ось ординат
-    ax[1][0].plot(mu_ser)
+    ax[1][0].set_ylabel("diff")  # ось ординат
+    ax[1][0].plot(diff_ser)
     ax[1][0].grid()
 
-    ax[2][0].set_title("Trend derivarive")
+    ax[2][0].set_title("dg_max")
     ax[2][0].set_xlabel("t")  # ось абсцисс
-    ax[2][0].set_ylabel("mu'")  # ось ординат
-    ax[2][0].plot(dmu_ser)
+    ax[2][0].set_ylabel("d/dt trend")  # ось ординат
+    ax[2][0].plot(dg_max_ser)
     ax[2][0].grid()
 
     ax[3][0].set_title("p'''")
@@ -818,6 +818,28 @@ def calc_hybrid_alg(_p_arr: np.array, output_flag=True, time=14):
     diff2_arr = np.array([diff_arr[i] - diff_arr[i-1] if i > 1 else 0. for i in range(n_max)])
     dtrend_arr = np.zeros(n_max)
     d2trend_arr = np.zeros(n_max)
+    # Считаем тренды и разности для передачи в алгоритмы
+    # Самую малость жульничаем с целью экономии ресурса (считаем все как будто оно уже есть),
+    # но это не влияет на логику работы алгоритмов
+    for i in range(5, n_max):
+        _, gdp_trend = sm.tsa.filters.hpfilter(_p_arr[:i + 1])
+        dtrend_arr[i] = (gdp_trend[i] - gdp_trend[i-1]) / dt
+        d2trend_arr[i] = (dtrend_arr[i] - dtrend_arr[i-1]) / dt
+
+
+
+
+
+        # dtrend_arr[i] = (_p_arr[i] - _p_arr[i - 1]) / dt
+        # d2trend_arr[i] = (dtrend_arr[i] - dtrend_arr[i - 1]) / dt
+
+
+
+
+
+
+
+
     mu_arr = np.array([])
     dmu_arr = np.array([])
     k_arr = np.zeros(n_max)
@@ -831,58 +853,79 @@ def calc_hybrid_alg(_p_arr: np.array, output_flag=True, time=14):
     history = []
     des_str, state = '', 'none'
     alg_id_tpl = (True, 1., 1.)
+    # Набор списков для перебора тривиальных алгоритмов
+    # trend_range, k_i_range, k_d_range = [True, False], np.linspace(-1., 1., 51), np.linspace(-1., 1., 51) # 0.001758242510686895
+    # trend_range, k_i_range, k_d_range = [True, False], [-1., 0., 1.], [-1., 0., 1.]     # 0.0016804296959076425
+    trend_range, k_i_range, k_d_range = [False], [1.], [1.]
+    # Список словарей для окружения алгоритма
+    alg_lst = []
+    # Инициализация словарей
+    for alg_id, (trend_flag, k_i, k_d) in enumerate(product(trend_range, k_i_range, k_d_range)):
+        alg_dct = {'id': alg_id,
+                   'params': (trend_flag, k_i, k_d),
+                   'state': 'none',
+                   'des': '',
+                   'history': [],
+                   'dt': dt,
+                   'p': _p_arr,
+                   'dg': np.zeros(n_max),
+                   'di': np.zeros(n_max)
+                   }
+        if not trend_flag:
+            alg_dct.update({'mu': diff_arr, 'dmu': diff2_arr, 'mu_min': diff_min, 'mu_max': diff_max})
+        else:
+            alg_dct.update({'mu': dtrend_arr, 'dmu': d2trend_arr, 'mu_min': trend_min, 'mu_max': trend_max})
+        alg_lst.append(alg_dct)
+
     # Main cycle
+    # Какой алгоритм считает по умолчанию
+    id_cur = 0    # 0.004316337290542643
+    alg_cur_id, alg_cur_dct = id_cur, alg_lst[id_cur]
+    num_switches = 0
     for i in range(1, n_max - 1):
         if i == n_max - 1:
             k_arr[i], k_i_arr[i], k_d_arr[i], k_dd_arr[i], dg_arr[i], di_arr[i] = 0., 0., 0., 0., 0., 0.
             break
-        if i > 5:
-            # _, gdp_trend = sm.tsa.filters.hpfilter(_p_arr[:i + 1])
-            # dtrend_arr[i] = (gdp_trend[i] - gdp_trend[i-1]) / dt
-            # d2trend_arr[i] = (dtrend_arr[i] - dtrend_arr[i-1]) / dt
-            dtrend_arr[i] = (_p_arr[i] - _p_arr[i-1]) / dt
-            d2trend_arr[i] = (dtrend_arr[i] - dtrend_arr[i-1]) / dt
         dgm = -10.e10
-        # for trend_flag, k_i, k_d in product([True, False], np.linspace(-1., 1., 11), np.linspace(-1., 1., 11)):
-        alg_env_tpl_max = tuple()
-        alg_dct = dict()
-        for alg_idx, (trend_flag, k_i, k_d) in enumerate(product([True, False], [-1., 1.], [-1., 1.])):
-            alpha_tpl = (1., k_i, k_d, 1.)
-            if not trend_flag:
-                mu_arr = diff_arr
-                dmu_arr = diff2_arr
-                mu_min = diff_min
-                mu_max = diff_max
-            else:
-                mu_arr = dtrend_arr
-                dmu_arr = d2trend_arr
-                mu_min = trend_min
-                mu_max = trend_max
-            data_dct = {'p': _p_arr, 'mu': mu_arr, 'dmu': dmu_arr, 'di': di_arr, 'dg': dg_arr}
-            params_dct = {'dt': dt, 'mu_min': mu_min, 'mu_max': mu_max, 'history': history, 'state': state}
-            # alg_env == (des_str, state, dg_new, di_new, di_next, history)
-            alg_env_tpl = calc_step(i, alpha_tpl, data_dct, params_dct)
-            print(f'Алгоритм с k_i={k_i}, k_d={k_d}, trend={trend_flag} дает на этом шаге dg={alg_env_tpl[2]} прибыли',
-                  f'и предлагает решение {alg_env_tpl[0]}')
-            dg_alg = alg_env_tpl[2]
-            if dg_alg >= dgm:
-                dgm = dg_alg
-                alg_id_tpl = trend_flag, k_i, k_d
-                alg_env_tpl_max = alg_env_tpl[:]
-                # des_str, dg_arr[i], di_arr[i], di_arr[i + 1], price_prev, history, long_is_opened, short_is_opened
+        rating_cur = {}
+        for alg_id, alg_dct in enumerate(alg_lst):
+            calc_step(i, alg_dct)
+            trend_flag, k_i, k_d = alg_dct['params']
+            dg, des, state = alg_dct['dg'][i], alg_dct['des'], alg_dct['state']
+            # print(f'Алг.{alg_id} с k_i={k_i}, k_d={k_d}, trend={trend_flag}: dg={dg} -> {des}')
+            if state == 'none':
+                rating_cur[alg_id] = dg
+            if dg > dgm:
+                dgm = dg
         dg_max_arr[i] = dgm
-        trend_flag, k_i_arr[i], k_d_arr[i] = alg_id_tpl
-        des_str, state, dg_arr[i], di_arr[i], di_arr[i+1], history = alg_env_tpl_max
+        tf_cur, ki_cur, kd_cur = alg_cur_dct['params']
+        des_cur = alg_cur_dct['des']
+        dg_cur, di_cur, dinxt_cur = alg_cur_dct['dg'][i], alg_cur_dct['di'][i], alg_cur_dct['di'][i+1]
+        dg_arr[i], di_arr[i], di_arr[i+1] = dg_cur, di_cur, dinxt_cur
+        alg_new_id = max(rating_cur, key=rating_cur.get) if rating_cur else -1
         if output_flag:
-            print(f'Выбран алгоритм с k_i={k_i}, k_d={k_d}, trend={trend_flag} и решением {des_str}')
-            print(f'iter={i}, t={round(t_arr[i] / 3600., 2)} p={_p_arr[i]} diff={round(diff_arr[i], 4)}',
-                  f'ddiff={round(dmu_arr[i], 4)} dtr={round(dtrend_arr[i], 4)} d2tr={round(d2trend_arr[i], 4)}',
-                  f'dI={round(di_arr[i], 4)} dg={dg_arr[i]}, dg_max={round(dg_max_arr[i], 4)} k={round(k_arr[i], 4)}',
-                  f'k_i={round(k_i_arr[i], 4)} k_d={round(k_d_arr[i], 4)} -> {des_str}')
+            # print(f'Выбираем мз алгоритмов {rating_cur.keys()} с прибылями {rating_cur.values()}')
+            # print(f'Максимальная прибыль у алгоритма {alg_new_id}')
+            # print(f'Текущий алгоритм {alg_cur_id}: с k = ({trend_flag}, {k_i}, {k_d}) и решением {des_cur}')
+            print(f'{i}: alg{alg_cur_id} t={round(t_arr[i]/3600., 2)} p={_p_arr[i]}',
+                  f'd/d2={round(diff_arr[i], 4)}/{round(diff2_arr[i], 4)}',
+                  f'dtr/d2tr={round(dtrend_arr[i], 4)}/{round(d2trend_arr[i], 4)}',
+                  f'dI={round(di_cur, 4)} dg={dg_cur} dg_max={round(dg_max_arr[i], 4)} -> {des_cur}')
+        # Переключаемся на новый, если в том есть необходимость
+        if alg_new_id >= 0 and dg_cur < 0 and rating_cur[alg_new_id] > dg_cur:
+            alg_cur_id, alg_cur_dct = alg_new_id, alg_lst[alg_new_id]
+            if output_flag:
+                print(f'Переключаемся на алгоритм {alg_new_id}, который показал dg={rating_cur[alg_new_id]}')
+            num_switches += 1
+
+    dg_max_arr = np.array([max([alg['dg'][i] for alg in alg_lst]) for i in range(n_max)])
+
     t_ticks_arr = t_arr / 3600.
     p_ser = pd.Series(_p_arr, index=t_ticks_arr)
-    mu_ser = pd.Series(mu_arr, index=t_ticks_arr)
-    dmu_ser = pd.Series(dmu_arr, index=t_ticks_arr)
+    diff_ser = pd.Series(diff_arr, index=t_ticks_arr)
+    diff2_ser = pd.Series(diff2_arr, index=t_ticks_arr)
+    dtrend_ser = pd.Series(dtrend_arr, index=t_ticks_arr)
+    d2trend_ser = pd.Series(d2trend_arr, index=t_ticks_arr)
     k_ser = pd.Series(k_arr, index=t_ticks_arr)
     k_i_ser = pd.Series(k_i_arr, index=t_ticks_arr)
     k_d_ser = pd.Series(k_d_arr, index=t_ticks_arr)
@@ -893,32 +936,21 @@ def calc_hybrid_alg(_p_arr: np.array, output_flag=True, time=14):
     i_ser = pd.Series(np.cumsum(di_ser), index=t_ticks_arr)
     profit_ser = pd.Series(np.cumsum(dg_ser), index=t_ticks_arr)
     profit = profit_ser.iloc[-1]
-    if output_flag:
-        print('Заработано:', profit)
-    return p_ser, mu_ser, dmu_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, k_i_ser, k_d_ser, k_dd_ser
+    # if output_flag:
+    print('Заработано:', profit, 'число переключений:', num_switches)
+    return p_ser, diff_ser, dg_max_ser, dg_ser, profit_ser, di_ser, i_ser, k_ser, k_i_ser, k_d_ser, k_dd_ser
 
 
-def calc_step(i, alpha_tpl, data_dct, params_dct):
+def calc_step(i, data_dct):
     """
     Один шаг алгоритма. Получаем на вход номер шага и данные.
-
-    Что ему надо знать:
-    - вектор параметров alpha_p, i, d, dd
-    - p[i], ... (i-1?)
-    - mu[i]. dmu[i] -- разность либо тренд
-    - di[i]
-    - dg[i-1], dg[i-2], dg[i-3]
-    - state
-    - history
-    -
-
     """
+    id = data_dct['id']
+    _, k_i, k_d = data_dct['params']
     p, mu, dmu, di, dg = data_dct['p'], data_dct['mu'], data_dct['dmu'], data_dct['di'], data_dct['dg']
-    dt, mu_min, mu_max = params_dct['dt'], params_dct['mu_min'], params_dct['mu_max']
-    history, state = params_dct['history'], params_dct['state']
-    alpha_p, alpha_i, alpha_d, alpha_dd = alpha_tpl
+    mu_min, mu_max = data_dct['mu_min'], data_dct['mu_max']
+    state, des_str, history, dt = data_dct['state'], data_dct['des'], data_dct['history'], data_dct['dt']
     di_new, di_next = di[i], 0.
-    des_str = ''
     # Производные прибыли dg для управления
     dg_diff = 0.
     dg_diff_prev = 0.
@@ -928,19 +960,14 @@ def calc_step(i, alpha_tpl, data_dct, params_dct):
         dg_diff_prev = (dg[i-2] - dg[i-3]) / dt
     dg_diff_diff = (dg_diff - dg_diff_prev) / dt
     dg_pos = 0.
-    # Proportional part
-    k_p = alpha_p
     # Integral part
     integ_sum = 0.
-    k_i = alpha_i
     if i > 10:
         coef_arr = np.array([math.exp(float(-j) / 10.) for j in range(10, -1, -1)])
         for cnt in range(10, -1, -1):
             integ_sum += dg[i - cnt] * coef_arr[10 - cnt]
-    # Differential part
-    k_d = alpha_d
     # Double-differential part
-    k_dd = alpha_dd
+    k_dd = 1.
     # Decision part
     if state == 'short opened':
         dg_pos = - (p[i] - history[0]) * math.fabs(di_new) / p[i]
@@ -948,11 +975,7 @@ def calc_step(i, alpha_tpl, data_dct, params_dct):
             des_str, state = 'Close short', 'none'
             k_p = 1.
             dg_new = dg_pos
-            di_next = \
-                k_p * dg_new + \
-                k_i * integ_sum + \
-                k_d * dg_diff + \
-                k_dd * dg_diff_diff
+            di_next = .25 * (k_p * dg_new + k_i * integ_sum + k_d * dg_diff + k_dd * dg_diff_diff)
             history = []
         else:
             des_str, state = 'Hold', 'short opened'
@@ -966,11 +989,7 @@ def calc_step(i, alpha_tpl, data_dct, params_dct):
             des_str, state = 'Close long', 'none'
             k_p = -1.
             dg_new = dg_pos
-            di_next = \
-                k_p * dg_new + \
-                k_i * integ_sum + \
-                k_d * dg_diff + \
-                k_dd * dg_diff_diff
+            di_next = .25 * (k_p * dg_new + k_i * integ_sum + k_d * dg_diff + k_dd * dg_diff_diff)
             history = []
         else:
             des_str, state = 'Hold', 'long opened'
@@ -996,7 +1015,9 @@ def calc_step(i, alpha_tpl, data_dct, params_dct):
         dg_new = 0.
         di_new, di_next = 0., 1.
         history = []
-    return des_str, state, dg_new, di_new, di_next, history
+    data_dct['des'], data_dct['state'], data_dct['history'] = des_str, state, history
+    dg[i], di[i], di[i+1] = dg_new, di_new, di_next
+    return  # des_str, state, dg_new, di_new, di_next, history
 
 
 if __name__ == '__main__':
